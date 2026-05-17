@@ -1,0 +1,87 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 0. Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Phase 3: Primitives
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    
+    function isOwner(ownerId) {
+      return isSignedIn() && request.auth.uid == ownerId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // 10. Temporal Integrity (Strict Timestamps) boilerplate
+    // (Actual fields would need validation in isValidEntity)
+
+    // Phase 4: Entity Validation
+    function isValidSale(data) {
+      return data.keys().hasAll(['ownerId', 'encryptedData', 'createdAt']) 
+          && data.keys().size() == 3
+          && data.ownerId is string
+          && data.ownerId == request.auth.uid
+          && data.encryptedData is string;
+    }
+
+    function isValidUser(data) {
+      return data.keys().hasAll(['email', 'subscriptionStatus', 'daysLeft'])
+          && data.email is string
+          && data.subscriptionStatus in ['trial', 'active', 'expired', 'lifetime']
+          && data.daysLeft is int;
+    }
+
+    function isValidTax(data) {
+      return data.keys().hasAll(['taxes'])
+          && data.taxes is list;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && request.auth.token.email == 'nemix.danrow2007@gmail.com';
+    }
+
+    match /test/connection {
+      allow get: if true;
+    }
+
+    match /finsol_sales/{saleId} {
+      allow get: if isOwner(existing().ownerId);
+      allow list: if isSignedIn() && resource.data.ownerId == request.auth.uid;
+      allow create: if isSignedIn() && isValidSale(incoming());
+      allow update: if isOwner(existing().ownerId) && isValidSale(incoming());
+      allow delete: if isOwner(existing().ownerId);
+    }
+
+    match /finsol_users/{uid} {
+      allow get: if isOwner(uid) || isAdmin();
+      allow list: if isAdmin();
+      allow create: if isOwner(uid) && isValidUser(incoming());
+      allow update: if (isOwner(uid) && (
+        incoming().diff(existing()).affectedKeys().hasOnly(['clicks', 'inputs']) ||
+        isValidUser(incoming())
+      )) || isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    match /finsol_taxes/{uid} {
+      allow get: if isOwner(uid);
+      allow create, update: if isOwner(uid) && isValidTax(incoming());
+      allow delete: if isOwner(uid);
+    }
+  }
+}

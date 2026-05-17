@@ -1,0 +1,61 @@
+{
+  "entities": {
+    "sale": {
+      "title": "Kaspi Sale",
+      "description": "An encrypted record of a Kaspi marketplace sale.",
+      "type": "object",
+      "properties": {
+        "ownerId": { "type": "string" },
+        "encryptedData": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["ownerId", "encryptedData"]
+    },
+    "user": {
+      "title": "FinSol User",
+      "description": "User profile with subscription status and activity metrics.",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string" },
+        "subscriptionStatus": { "type": "string" },
+        "daysLeft": { "type": "integer" },
+        "clicks": { "type": "integer" },
+        "inputs": { "type": "integer" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["email", "subscriptionStatus", "daysLeft"]
+    },
+    "tax": {
+      "title": "User Taxes",
+      "description": "A collection of user-defined taxes.",
+      "type": "object",
+      "properties": {
+        "taxes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string" },
+              "name": { "type": "string" },
+              "percentage": { "type": "number" }
+            }
+          }
+        }
+      }
+    }
+  },
+  "firestore": {
+    "finsol_sales/{saleId}": {
+      "schema": "sale",
+      "description": "User Kaspi sales"
+    },
+    "finsol_users/{uid}": {
+      "schema": "user",
+      "description": "User profiles and billing info"
+    },
+    "finsol_taxes/{uid}": {
+      "schema": "tax",
+      "description": "User tax configuration"
+    }
+  }
+}
