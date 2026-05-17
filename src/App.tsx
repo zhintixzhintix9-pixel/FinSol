@@ -119,6 +119,14 @@ interface Tax {
   percentage: number;
 }
 
+interface Employee {
+  id: string;
+  name: string;
+  position: string;
+  salary: number;
+  lastPaidDate?: string;
+}
+
 interface AppConfig {
   showAi: boolean;
   showWarehouse: boolean;
@@ -275,7 +283,9 @@ const AdminPanel = ({ currentUser, taxes = [], onUpdateTaxes, config, onUpdateCo
   onUpdateTaxes: (taxes: Tax[]) => void,
   config: AppConfig,
   onUpdateConfig: (config: AppConfig) => void,
-  isAdminMode: boolean
+  isAdminMode: boolean,
+  employees: Employee[],
+  onDeleteEmployee: (id: string) => void
 }) => {
   const [users, setUsers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -463,14 +473,17 @@ const AdminPanel = ({ currentUser, taxes = [], onUpdateTaxes, config, onUpdateCo
   );
 };
 
-const ManagementView = ({ currentUser, taxes, onUpdateTaxes, config, onUpdateConfig }: { 
+const ManagementView = ({ currentUser, taxes, onUpdateTaxes, config, onUpdateConfig, employees, onDeleteEmployee, isAdminMode, setIsAdminMode }: { 
   currentUser: User, 
   taxes: Tax[], 
   onUpdateTaxes: (taxes: Tax[]) => void,
   config: AppConfig,
-  onUpdateConfig: (config: AppConfig) => void
+  onUpdateConfig: (config: AppConfig) => void,
+  employees: Employee[],
+  onDeleteEmployee: (id: string) => void,
+  isAdminMode: boolean,
+  setIsAdminMode: (val: boolean) => void
 }) => {
-  const [isAdminMode, setIsAdminMode] = useState(false);
   const MASTER_PASS = "cisweb08090420074080";
 
   const unlockAdmin = () => {
@@ -493,11 +506,15 @@ const ManagementView = ({ currentUser, taxes, onUpdateTaxes, config, onUpdateCon
           onClick={unlockAdmin}
           className="group relative flex items-center justify-center"
         >
-          <div className="p-3 glass rounded-2xl group-hover:bg-indigo-500/10 transition-all border border-white/5 active:scale-95">
-            <Lock size={18} className="opacity-40 group-hover:opacity-100 group-hover:text-indigo-400 transition-all" />
+          <div className={`p-3 glass rounded-2xl transition-all border border-white/5 active:scale-95 ${isAdminMode ? 'bg-indigo-500/20 shadow-[0_0_15px_rgba(99,102,241,0.2)]' : 'group-hover:bg-indigo-500/10'}`}>
+            {isAdminMode ? (
+              <Crown size={18} className="text-indigo-400 animate-pulse" />
+            ) : (
+              <Lock size={18} className="opacity-40 group-hover:opacity-100 group-hover:text-indigo-400 transition-all" />
+            )}
           </div>
           <span className="absolute -top-8 right-0 bg-[#05050b] border border-white/5 text-[8px] px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-all pointer-events-none whitespace-nowrap">
-            Mouse Tech Panel
+            {isAdminMode ? 'Mouse Tech Connected' : 'Mouse Tech Panel'}
           </span>
         </button>
       </div>
@@ -509,6 +526,8 @@ const ManagementView = ({ currentUser, taxes, onUpdateTaxes, config, onUpdateCon
         config={config} 
         onUpdateConfig={onUpdateConfig} 
         isAdminMode={isAdminMode}
+        employees={employees}
+        onDeleteEmployee={onDeleteEmployee}
       />
 
       <div className="glass glass-card opacity-50">
@@ -710,7 +729,14 @@ const DashboardView = ({ sales, warehouse, config }: { sales: KaspiSale[], wareh
   );
 };
 
-const AccountingView = ({ onSave, warehouse, taxes, config }: { onSave: (sale: KaspiSale) => void, warehouse: WarehouseItem[], taxes: Tax[], config: AppConfig }) => {
+const AccountingView = ({ onSave, warehouse, taxes, config, employees, onUpdateEmployees }: { 
+  onSave: (sale: KaspiSale) => void, 
+  warehouse: WarehouseItem[], 
+  taxes: Tax[], 
+  config: AppConfig,
+  employees: Employee[],
+  onUpdateEmployees: (emps: Employee[]) => void
+}) => {
   const [mode, setMode] = useState<'sales' | 'payroll'>('sales');
   const [form, setForm] = useState({
     name: '',
@@ -722,6 +748,28 @@ const AccountingView = ({ onSave, warehouse, taxes, config }: { onSave: (sale: K
     position: '',
     salaryAmount: ''
   });
+
+  const getStatus = (lastPaidDate?: string) => {
+    if (!lastPaidDate) return { label: 'Не оплачено', color: 'text-rose-400', bg: 'bg-rose-500/10' };
+    const lastDate = new Date(lastPaidDate);
+    const now = new Date();
+    
+    const isCurrentMonth = lastDate.getMonth() === now.getMonth() && lastDate.getFullYear() === now.getFullYear();
+    if (isCurrentMonth) return { label: 'Оплачено', color: 'text-emerald-400', bg: 'bg-emerald-500/10' };
+    
+    // Check if expected pay date (e.g. 5th of month) is coming up
+    const daysSince = Math.floor((now.getTime() - lastDate.getTime()) / (1000 * 60 * 60 * 24));
+    if (daysSince > 25) return { label: 'Скоро', color: 'text-amber-400', bg: 'bg-amber-500/10' };
+    
+    return { label: 'Ожидание', color: 'text-white/40', bg: 'bg-white/5' };
+  };
+
+  const deleteEmployee = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (confirm("Удалить сотрудника из списка?")) {
+      onUpdateEmployees(employees.filter(emp => emp.id !== id));
+    }
+  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -766,9 +814,39 @@ const AccountingView = ({ onSave, warehouse, taxes, config }: { onSave: (sale: K
         revenue: 0,
         margin: -amount
       });
+
+      // Update or Add Employee
+      const existingIdx = employees.findIndex(emp => emp.name === form.employeeName);
+      const updatedEmployees = [...employees];
+      if (existingIdx > -1) {
+        updatedEmployees[existingIdx] = {
+          ...updatedEmployees[existingIdx],
+          position: form.position,
+          salary: amount,
+          lastPaidDate: form.date
+        };
+      } else {
+        updatedEmployees.unshift({
+          id: Math.random().toString(36).substr(2, 9),
+          name: form.employeeName,
+          position: form.position,
+          salary: amount,
+          lastPaidDate: form.date
+        });
+      }
+      onUpdateEmployees(updatedEmployees);
     }
 
     setForm({ name: '', cost: '', price: '', qty: '1', date: new Date().toISOString().split('T')[0], employeeName: '', position: '', salaryAmount: '' });
+  };
+
+  const selectEmployee = (emp: Employee) => {
+    setForm({
+      ...form,
+      employeeName: emp.name,
+      position: emp.position,
+      salaryAmount: emp.salary.toString()
+    });
   };
 
   return (
@@ -796,7 +874,7 @@ const AccountingView = ({ onSave, warehouse, taxes, config }: { onSave: (sale: K
         )}
       </div>
 
-      <form onSubmit={handleSubmit} className="glass glass-card space-y-4">
+      <form onSubmit={handleSubmit} className="glass glass-card border-white/5 space-y-4">
         {mode === 'sales' ? (
           <>
             <div className="space-y-1">
@@ -927,6 +1005,50 @@ const AccountingView = ({ onSave, warehouse, taxes, config }: { onSave: (sale: K
           </span>
         </button>
       </form>
+
+      {mode === 'payroll' && employees.length > 0 && (
+        <div className="space-y-4">
+          <p className="text-[10px] bento-label ml-2 uppercase text-white/30">Ваши сотрудники</p>
+          <div className="grid gap-3">
+            {employees.map(emp => {
+              const status = getStatus(emp.lastPaidDate);
+              return (
+                <div 
+                  key={emp.id} 
+                  onClick={() => selectEmployee(emp)}
+                  className="glass p-4 rounded-2xl border border-white/5 flex items-center justify-between group active:scale-[0.98] transition-all cursor-pointer hover:bg-white/5"
+                >
+                  <div className="flex items-center space-x-4">
+                    <div className="w-10 h-10 rounded-xl bg-indigo-500/10 flex items-center justify-center text-indigo-400">
+                      <Users size={18} />
+                    </div>
+                    <div>
+                      <h4 className="text-sm font-bold">{emp.name}</h4>
+                      <p className="text-[10px] text-white/40">{emp.position} • {emp.salary.toLocaleString()} ₸</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center space-x-3">
+                    <button 
+                      onClick={(e) => deleteEmployee(emp.id, e)}
+                      className="p-2 text-white/10 hover:text-rose-500 transition-all"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                    <div className="text-right">
+                      <span className={`text-[9px] font-bold uppercase px-2 py-1 rounded-lg ${status.bg} ${status.color}`}>
+                        {status.label}
+                      </span>
+                      {emp.lastPaidDate && (
+                        <p className="text-[8px] text-white/20 mt-1 uppercase">ЛП: {emp.lastPaidDate.split('-').reverse().slice(0, 2).join('.')}</p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {mode === 'sales' && (
         <div className="p-4 glass rounded-2xl border-white/5 space-y-2 opacity-50">
@@ -1138,6 +1260,8 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('dashboard');
   const [sales, setSales] = useState<KaspiSale[]>([]);
   const [warehouse, setWarehouse] = useState<WarehouseItem[]>([]);
+  const [employees, setEmployees] = useState<Employee[]>([]);
+  const [isAdminMode, setIsAdminMode] = useState(false);
   const [taxes, setTaxes] = useState<Tax[]>([]);
   const [config, setConfig] = useState<AppConfig>({
     showAi: true,
@@ -1224,13 +1348,18 @@ export default function App() {
     });
   }, []);
 
-  // Warehouse & Config remains local
+  // Warehouse, Employees & Config remains local
   useEffect(() => {
     const savedWarehouse = localStorage.getItem('finsol_warehouse_enc');
+    const savedEmployees = localStorage.getItem('finsol_employees_enc');
     const savedConfig = localStorage.getItem('finsol_config');
     if (savedWarehouse) {
       const decrypted = decryptData(savedWarehouse);
       if (decrypted) setWarehouse(decrypted);
+    }
+    if (savedEmployees) {
+      const decrypted = decryptData(savedEmployees);
+      if (decrypted) setEmployees(decrypted);
     }
     if (savedConfig) {
       setConfig(JSON.parse(savedConfig));
@@ -1240,9 +1369,10 @@ export default function App() {
   useEffect(() => {
     if (!loading) {
       localStorage.setItem('finsol_warehouse_enc', encryptData(warehouse));
+      localStorage.setItem('finsol_employees_enc', encryptData(employees));
       localStorage.setItem('finsol_config', JSON.stringify(config));
     }
-  }, [warehouse, config, loading]);
+  }, [warehouse, employees, config, loading]);
 
   const updateTaxes = async (newTaxes: Tax[]) => {
     if (!auth.currentUser) return;
@@ -1252,6 +1382,10 @@ export default function App() {
     } catch (e) {
       handleFirestoreError(e, OperationType.WRITE, "finsol_taxes");
     }
+  };
+
+  const deleteEmployee = (id: string) => {
+    setEmployees(employees.filter(e => e.id !== id));
   };
 
   const addSale = async (sale: KaspiSale) => {
@@ -1384,10 +1518,22 @@ export default function App() {
             transition={{ duration: 0.4, ease: [0.33, 1, 0.68, 1] }}
           >
             {activeTab === 'dashboard' && <DashboardView sales={sales} warehouse={warehouse} config={config} />}
-            {activeTab === 'accounting' && <AccountingView onSave={addSale} warehouse={warehouse} taxes={taxes} config={config} />}
+            {activeTab === 'accounting' && <AccountingView onSave={addSale} warehouse={warehouse} taxes={taxes} config={config} employees={employees} onUpdateEmployees={setEmployees} />}
             {activeTab === 'warehouse' && config.showWarehouse && <WarehouseView items={warehouse} sales={sales} onAdd={addWarehouse} onDelete={deleteWarehouse} />}
             {activeTab === 'history' && <HistoryView sales={sales} onDelete={deleteSale} />}
-            {activeTab === 'management' && <ManagementView currentUser={user} taxes={taxes} onUpdateTaxes={updateTaxes} config={config} onUpdateConfig={setConfig} />}
+            {activeTab === 'management' && (
+              <ManagementView 
+                currentUser={user} 
+                taxes={taxes} 
+                onUpdateTaxes={updateTaxes} 
+                config={config} 
+                onUpdateConfig={setConfig} 
+                employees={employees} 
+                onDeleteEmployee={deleteEmployee}
+                isAdminMode={isAdminMode}
+                setIsAdminMode={setIsAdminMode}
+              />
+            )}
           </motion.div>
         </AnimatePresence>
       </main>
