@@ -25,7 +25,14 @@ import { motion, AnimatePresence } from 'motion/react';
 import gsap from 'gsap';
 import CryptoJS from 'crypto-js';
 import { initializeApp } from 'firebase/app';
-import { getAuth, signInWithPopup, GoogleAuthProvider, onAuthStateChanged, User, signOut } from 'firebase/auth';
+import { 
+  getAuth, 
+  onAuthStateChanged, 
+  User, 
+  signOut,
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword
+} from 'firebase/auth';
 import { 
   getFirestore, 
   collection, 
@@ -62,7 +69,6 @@ const app = initializeApp(firebaseConfig);
 // @ts-ignore
 const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
 const auth = getAuth(app);
-const provider = new GoogleAuthProvider();
 
 // Error Handling helper from System Instructions
 enum OperationType {
@@ -225,14 +231,27 @@ const SplashScreen = ({ onComplete }: { onComplete: () => void }) => {
   );
 };
 
-const PricingOverlay = ({ daysLeft }: { daysLeft: number }) => {
+const PricingOverlay = ({ daysLeft, userId }: { daysLeft: number, userId: string }) => {
   if (daysLeft > 0) return null;
 
   const plans = [
-    { title: "Подписка селлера", price: "15 000 ₸", period: "мес", desc: "Полный учет и аналитика" },
-    { title: "Lifetime-Лицензия", price: "150 000 ₸", period: "навсегда", desc: "Разовая оплата, все обновления" },
-    { title: "Enterprise под ключ", price: "350 000 ₸", period: "фикс", desc: "Индивидуальная поддержка" },
+    { title: "Подписка селлера", price: "15 000 ₸", period: "мес", desc: "Полный учет и аналитика", days: 30 },
+    { title: "Lifetime-Лицензия", price: "150 000 ₸", period: "навсегда", desc: "Разовая оплата, все обновления", days: 36500 }, // 100 years
+    { title: "Enterprise под ключ", price: "350 000 ₸", period: "фикс", desc: "Индивидуальная поддержка", days: 365 },
   ];
+
+  const handlePurchase = async (days: number) => {
+    try {
+      const userRef = doc(db, "finsol_users", userId);
+      await updateDoc(userRef, { 
+        daysLeft: days,
+        subscriptionStatus: days > 3650 ? 'lifetime' : 'active',
+        updatedAt: serverTimestamp()
+      });
+    } catch (e) {
+      handleFirestoreError(e, OperationType.UPDATE, `finsol_users/${userId}`);
+    }
+  };
 
   return (
     <motion.div 
@@ -259,7 +278,10 @@ const PricingOverlay = ({ daysLeft }: { daysLeft: number }) => {
                   <p className="text-[10px] text-white/20">/ {plan.period}</p>
                 </div>
               </div>
-              <button className="w-full py-3 bg-rose-600 hover:bg-rose-500 rounded-xl font-bold text-xs uppercase tracking-widest transition-all">
+              <button 
+                onClick={() => handlePurchase(plan.days)}
+                className="w-full py-3 bg-[#E50914] hover:bg-[#ff0a16] rounded-xl font-bold text-xs uppercase tracking-widest transition-all shadow-[0_0_15px_rgba(229,9,20,0.3)] active:scale-95"
+              >
                 Оплатить через Kaspi
               </button>
             </div>
@@ -1258,6 +1280,9 @@ export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [appUser, setAppUser] = useState<FinSolUser | null>(null);
   const [activeTab, setActiveTab] = useState('dashboard');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [authError, setAuthError] = useState('');
   const [sales, setSales] = useState<KaspiSale[]>([]);
   const [warehouse, setWarehouse] = useState<WarehouseItem[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
@@ -1293,11 +1318,11 @@ export default function App() {
           const newUser = {
             email: u.email,
             subscriptionStatus: 'trial',
-            daysLeft: 7,
+            daysLeft: 5,
             updatedAt: serverTimestamp()
           };
           await setDoc(userRef, newUser);
-          setAppUser({ uid: u.uid, email: u.email!, subscriptionStatus: 'trial', daysLeft: 7 });
+          setAppUser({ uid: u.uid, email: u.email!, subscriptionStatus: 'trial', daysLeft: 5 });
         } else {
           const data = userSnap.data();
           setAppUser({ 
@@ -1347,6 +1372,26 @@ export default function App() {
       }
     });
   }, []);
+
+  const handleLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAuthError('');
+    try {
+      await signInWithEmailAndPassword(auth, email, password);
+    } catch (error: any) {
+      setAuthError('Неверный логин или пароль');
+    }
+  };
+
+  const handleRegister = async () => {
+    if (!email || !password) return;
+    setAuthError('');
+    try {
+      await createUserWithEmailAndPassword(auth, email, password);
+    } catch (error: any) {
+      setAuthError('Ошибка регистрации. Возможно, email уже занят.');
+    }
+  };
 
   // Warehouse, Employees & Config remains local
   useEffect(() => {
@@ -1421,8 +1466,6 @@ export default function App() {
   const addWarehouse = (item: WarehouseItem) => setWarehouse([item, ...warehouse]);
   const deleteWarehouse = (id: string) => setWarehouse(warehouse.filter(i => i.id !== id));
 
-  const login = () => signInWithPopup(auth, provider);
-
   // User Activity Tracker
   useEffect(() => {
     if (!user) return;
@@ -1474,26 +1517,63 @@ export default function App() {
         <LiquidNeonBg />
         {!loading && (
           <motion.div 
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="space-y-12 max-w-sm"
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="space-y-12 max-w-sm w-full"
           >
             <div className="space-y-4">
               <h1 className="text-5xl font-light tracking-[1rem] platinum-glow uppercase">FINSOL</h1>
-              <p className="text-white/40 text-sm font-light leading-relaxed">
-                Ультимативная SaaS-платформа для финансовых директоров и селлеров Kaspi.
+              <p className="text-white/40 text-[10px] font-light leading-relaxed uppercase tracking-[0.2em] opacity-60">
+                Ultimate SaaS for Fin Directors
               </p>
             </div>
-            <button 
-              onClick={login}
-              className="w-full glass py-5 rounded-2xl flex items-center justify-center space-x-3 hover:bg-white/10 transition-all border-white/10 group active:scale-95"
-            >
-              <div className="w-6 h-6 bg-white rounded-full flex items-center justify-center group-hover:scale-110 transition-all">
-                <Crown size={14} className="text-black" />
+
+            <form onSubmit={handleLogin} className="space-y-6 pt-4">
+              <div className="space-y-3">
+                <div className="relative group">
+                  <input 
+                    required
+                    type="email" 
+                    placeholder="Email Address"
+                    value={email}
+                    onChange={e => setEmail(e.target.value)}
+                    className="w-full bg-white/5 border border-white/10 p-5 rounded-2xl text-sm focus:border-white/30 transition-all outline-none text-center platinum-glow"
+                  />
+                </div>
+                <div className="relative group">
+                  <input 
+                    required
+                    type="password" 
+                    placeholder="Password"
+                    value={password}
+                    onChange={e => setPassword(e.target.value)}
+                    className="w-full bg-white/5 border border-white/10 p-5 rounded-2xl text-sm focus:border-white/30 transition-all outline-none text-center platinum-glow"
+                  />
+                </div>
               </div>
-              <span className="font-bold tracking-widest text-xs uppercase">Войти через Google</span>
-            </button>
-            <div className="pt-8">
+
+              {authError && (
+                <p className="text-[10px] text-rose-500 font-bold uppercase tracking-wider">{authError}</p>
+              )}
+
+              <div className="grid grid-cols-2 gap-3">
+                <button 
+                  type="submit"
+                  className="glass py-5 rounded-2xl flex items-center justify-center space-x-3 bg-[#E50914]/10 hover:bg-[#E50914]/20 transition-all border border-[#E50914]/20 group active:scale-95"
+                >
+                  <span className="font-bold tracking-widest text-[10px] uppercase text-[#E50914]">Войти</span>
+                </button>
+                <button 
+                  type="button"
+                  onClick={handleRegister}
+                  className="glass py-5 rounded-2xl flex items-center justify-center space-x-3 hover:bg-white/10 transition-all border border-white/10 group active:scale-95"
+                >
+                  <span className="font-bold tracking-widest text-[10px] uppercase text-white/60">Регистрация</span>
+                </button>
+              </div>
+            </form>
+
+            <div className="pt-2">
               <p className="text-[10px] bento-label opacity-20">Mouse Tech Node • v4.0 Final Build</p>
             </div>
           </motion.div>
@@ -1506,7 +1586,7 @@ export default function App() {
     <div className="min-h-screen bg-[#05050b] text-white selection:bg-white selection:text-black">
       <LiquidNeonBg />
       
-      {appUser && <PricingOverlay daysLeft={appUser.daysLeft} />}
+      {appUser && <PricingOverlay daysLeft={appUser.daysLeft} userId={user.uid} />}
 
       <main className="max-w-2xl mx-auto px-4 pt-12 pb-32">
         <AnimatePresence mode="wait">
