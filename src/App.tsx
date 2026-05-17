@@ -376,7 +376,7 @@ const AdminPanel = ({ currentUser, taxes = [], onUpdateTaxes, config, onUpdateCo
             <table className="table-ios w-full">
               <thead>
                 <tr className="text-[10px] uppercase text-white/20">
-                  <th className="text-left py-2 font-bold">Email</th>
+                  <th className="text-left py-2 font-bold">Имя</th>
                   <th className="text-left py-2 font-bold">Лицензия</th>
                   <th className="text-left py-2 font-bold">Активность</th>
                   <th className="text-right py-2 font-bold">Действия</th>
@@ -386,7 +386,7 @@ const AdminPanel = ({ currentUser, taxes = [], onUpdateTaxes, config, onUpdateCo
                 {users.map((u) => (
                   <tr key={u.id} className="border-t border-white/5 py-4">
                     <td className="py-4">
-                      <p className="text-[11px] font-medium">{u.email}</p>
+                      <p className="text-[11px] font-medium">{u.email?.split('@')[0]}</p>
                     </td>
                     <td className="py-4">
                       <div className="flex flex-col">
@@ -1280,7 +1280,7 @@ export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [appUser, setAppUser] = useState<FinSolUser | null>(null);
   const [activeTab, setActiveTab] = useState('dashboard');
-  const [email, setEmail] = useState('');
+  const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [authError, setAuthError] = useState('');
   const [sales, setSales] = useState<KaspiSale[]>([]);
@@ -1377,19 +1377,19 @@ export default function App() {
     e.preventDefault();
     setAuthError('');
     try {
-      await signInWithEmailAndPassword(auth, email, password);
+      await signInWithEmailAndPassword(auth, `${username}@finsol.app`, password);
     } catch (error: any) {
       setAuthError('Неверный логин или пароль');
     }
   };
 
   const handleRegister = async () => {
-    if (!email || !password) return;
+    if (!username || !password) return;
     setAuthError('');
     try {
-      await createUserWithEmailAndPassword(auth, email, password);
+      await createUserWithEmailAndPassword(auth, `${username}@finsol.app`, password);
     } catch (error: any) {
-      setAuthError('Ошибка регистрации. Возможно, email уже занят.');
+      setAuthError('Это имя уже занято или данные некорректны');
     }
   };
 
@@ -1533,10 +1533,10 @@ export default function App() {
                 <div className="relative group">
                   <input 
                     required
-                    type="email" 
-                    placeholder="Email Address"
-                    value={email}
-                    onChange={e => setEmail(e.target.value)}
+                    type="text" 
+                    placeholder="Имя пользователя"
+                    value={username}
+                    onChange={e => setUsername(e.target.value)}
                     className="w-full bg-white/5 border border-white/10 p-5 rounded-2xl text-sm focus:border-white/30 transition-all outline-none text-center platinum-glow"
                   />
                 </div>
@@ -1544,7 +1544,7 @@ export default function App() {
                   <input 
                     required
                     type="password" 
-                    placeholder="Password"
+                    placeholder="Пароль"
                     value={password}
                     onChange={e => setPassword(e.target.value)}
                     className="w-full bg-white/5 border border-white/10 p-5 rounded-2xl text-sm focus:border-white/30 transition-all outline-none text-center platinum-glow"
