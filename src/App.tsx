@@ -19,7 +19,8 @@ import {
   Lock,
   Crown,
   CreditCard,
-  LogOut
+  LogOut,
+  UserPlus
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import gsap from 'gsap';
@@ -31,7 +32,8 @@ import {
   User, 
   signOut,
   signInWithEmailAndPassword,
-  createUserWithEmailAndPassword
+  createUserWithEmailAndPassword,
+  signInAnonymously
 } from 'firebase/auth';
 import { 
   getFirestore, 
@@ -158,6 +160,8 @@ interface FinSolUser {
   daysLeft: number;
   clicks?: number;
   inputs?: number;
+  isGuest?: boolean;
+  clientId?: string;
 }
 
 interface WarehouseItem {
@@ -231,8 +235,34 @@ const SplashScreen = ({ onComplete }: { onComplete: () => void }) => {
   );
 };
 
-const PricingOverlay = ({ daysLeft, userId }: { daysLeft: number, userId: string }) => {
+const PricingOverlay = ({ daysLeft, userId, isGuest }: { daysLeft: number, userId: string, isGuest?: boolean }) => {
   if (daysLeft > 0) return null;
+
+  if (isGuest) {
+    return (
+      <motion.div 
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        className="fixed inset-0 z-[100] glass flex items-center justify-center p-6 backdrop-blur-[40px]"
+      >
+        <div className="max-w-sm w-full space-y-8 text-center">
+          <div className="w-20 h-20 bg-rose-500/20 rounded-3xl flex items-center justify-center mx-auto mb-6 border border-rose-500/30">
+            <UserPlus className="text-rose-400" size={40} />
+          </div>
+          <div className="space-y-2">
+            <h2 className="text-3xl font-bold platinum-glow">ТРИАЛ ОКОНЧЕН</h2>
+            <p className="text-white/40 text-sm">Ваш гостевой доступ (5 дней) завершен. Пожалуйста, создайте рабочий аккаунт для сохранения данных.</p>
+          </div>
+          <button 
+            onClick={() => auth.signOut()}
+            className="w-full py-5 bg-white text-black font-bold rounded-2xl uppercase tracking-widest text-xs shadow-xl shadow-white/5"
+          >
+            Создать аккаунт
+          </button>
+        </div>
+      </motion.div>
+    );
+  }
 
   const plans = [
     { title: "Подписка селлера", price: "15 000 ₸", period: "мес", desc: "Полный учет и аналитика", days: 30 },
@@ -386,7 +416,15 @@ const AdminPanel = ({ currentUser, taxes = [], onUpdateTaxes, config, onUpdateCo
                 {users.map((u) => (
                   <tr key={u.id} className="border-t border-white/5 py-4">
                     <td className="py-4">
-                      <p className="text-[11px] font-medium">{u.email?.split('@')[0]}</p>
+                      <div className="flex flex-col">
+                        <p className="text-[11px] font-medium">{u.email?.split('@')[0]}</p>
+                        {u.clientId && (
+                          <p className="text-[8px] text-indigo-400 font-mono mt-1">{u.clientId}</p>
+                        )}
+                        {u.isGuest && (
+                          <span className="text-[8px] text-white/20 uppercase mt-1">Guest Mode</span>
+                        )}
+                      </div>
                     </td>
                     <td className="py-4">
                       <div className="flex flex-col">
@@ -1282,6 +1320,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('dashboard');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [isWorkingAccount, setIsWorkingAccount] = useState(true);
   const [authError, setAuthError] = useState('');
   const [sales, setSales] = useState<KaspiSale[]>([]);
   const [warehouse, setWarehouse] = useState<WarehouseItem[]>([]);
@@ -1316,20 +1355,25 @@ export default function App() {
         const userSnap = await getDoc(userRef);
         if (!userSnap.exists()) {
           const newUser = {
-            email: u.email,
+            email: u.email || 'guest@finsol.app',
             subscriptionStatus: 'trial',
             daysLeft: 5,
+            isGuest: u.isAnonymous,
             updatedAt: serverTimestamp()
           };
           await setDoc(userRef, newUser);
-          setAppUser({ uid: u.uid, email: u.email!, subscriptionStatus: 'trial', daysLeft: 5 });
+          setAppUser({ uid: u.uid, email: newUser.email, subscriptionStatus: 'trial', daysLeft: 5, isGuest: u.isAnonymous });
         } else {
           const data = userSnap.data();
           setAppUser({ 
             uid: u.uid, 
-            email: u.email!, 
+            email: data.email || u.email || 'guest@finsol.app', 
             subscriptionStatus: data.subscriptionStatus, 
-            daysLeft: data.daysLeft 
+            daysLeft: data.daysLeft,
+            clicks: data.clicks,
+            inputs: data.inputs,
+            isGuest: data.isGuest,
+            clientId: data.clientId
           });
         }
 
@@ -1373,6 +1417,11 @@ export default function App() {
     });
   }, []);
 
+  const generateClientId = () => {
+    const digits = Math.floor(1000000 + Math.random() * 9000000);
+    return `FS-${digits}`;
+  };
+
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setAuthError('');
@@ -1383,11 +1432,27 @@ export default function App() {
     }
   };
 
+  const handleGuestLogin = async () => {
+    setAuthError('');
+    try {
+      await signInAnonymously(auth);
+    } catch (e) {
+      setAuthError('Ошибка входа как гость');
+    }
+  };
+
   const handleRegister = async () => {
     if (!username || !password) return;
     setAuthError('');
     try {
-      await createUserWithEmailAndPassword(auth, `${username}@finsol.app`, password);
+      const userCredential = await createUserWithEmailAndPassword(auth, `${username}@finsol.app`, password);
+      // Extra step for working account if needed
+      if (isWorkingAccount) {
+        const userRef = doc(db, "finsol_users", userCredential.user.uid);
+        await updateDoc(userRef, { 
+          clientId: generateClientId() 
+        });
+      }
     } catch (error: any) {
       setAuthError('Это имя уже занято или данные некорректны');
     }
@@ -1529,6 +1594,23 @@ export default function App() {
             </div>
 
             <form onSubmit={handleLogin} className="space-y-6 pt-4">
+              <div className="flex items-center justify-center space-x-6 pb-2">
+                <button 
+                  type="button"
+                  onClick={() => setIsWorkingAccount(true)}
+                  className={`text-[10px] font-bold uppercase tracking-[0.2em] transition-all px-4 py-2 rounded-lg border ${isWorkingAccount ? 'bg-indigo-500/20 border-indigo-500/50 text-indigo-400' : 'opacity-30 border-transparent'}`}
+                >
+                  Рабочий
+                </button>
+                <button 
+                  type="button"
+                  onClick={() => setIsWorkingAccount(false)}
+                  className={`text-[10px] font-bold uppercase tracking-[0.2em] transition-all px-4 py-2 rounded-lg border ${!isWorkingAccount ? 'bg-white/10 border-white/20 text-white' : 'opacity-30 border-transparent'}`}
+                >
+                  Личный
+                </button>
+              </div>
+
               <div className="space-y-3">
                 <div className="relative group">
                   <input 
@@ -1571,6 +1653,16 @@ export default function App() {
                   <span className="font-bold tracking-widest text-[10px] uppercase text-white/60">Регистрация</span>
                 </button>
               </div>
+
+              <div className="pt-2">
+                <button 
+                  type="button"
+                  onClick={handleGuestLogin}
+                  className="w-full text-[9px] uppercase tracking-[0.3em] opacity-40 hover:opacity-100 transition-all py-3 border border-white/5 rounded-xl"
+                >
+                  Войти как гость
+                </button>
+              </div>
             </form>
 
             <div className="pt-2">
@@ -1586,7 +1678,7 @@ export default function App() {
     <div className="min-h-screen bg-[#05050b] text-white selection:bg-white selection:text-black">
       <LiquidNeonBg />
       
-      {appUser && <PricingOverlay daysLeft={appUser.daysLeft} userId={user.uid} />}
+      {appUser && <PricingOverlay daysLeft={appUser.daysLeft} userId={user.uid} isGuest={appUser.isGuest} />}
 
       <main className="max-w-2xl mx-auto px-4 pt-12 pb-32">
         <AnimatePresence mode="wait">
